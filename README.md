@@ -17,6 +17,8 @@ An automated data pipeline for extracting, transforming, and loading Zillow hous
 │   ├── 01_raw_tables.sql       # Raw layer table definitions
 │   ├── 02_staging.sql          # Staging transformations
 │   └── 03_marts.sql            # Analytics data marts
+├── docker/                     # Docker build files
+│   └── Dockerfile.airflow      # Custom Airflow image
 ├── docs/                       # Documentation
 │   ├── architecture.png        # System architecture diagram
 │   └── design_doc.pdf          # Detailed design document
@@ -27,41 +29,30 @@ An automated data pipeline for extracting, transforming, and loading Zillow hous
 
 This pipeline extracts housing market data from [Zillow Research](https://www.zillow.com/research/data/), which provides free, publicly available housing data.
 
-### Available Datasets
+### Datasets Used
 
 #### ZHVI (Zillow Home Value Index)
 
-The Zillow Home Value Index (ZHVI) is a smoothed, seasonally adjusted measure of the typical home value and market changes across a given region and housing type.
+The Zillow Home Value Index (ZHVI) is a smoothed, seasonally adjusted measure of the typical home value and market changes across a given region and housing type. This pipeline uses the **All Homes (35th–65th percentile)** dataset at the **state level**.
 
-| Dataset | Description | Geographic Levels |
-|---------|-------------|-------------------|
-| All Homes | Typical value for all home types (35th-65th percentile) | Metro, State, County, City, ZIP |
-| Single Family | Typical value for single-family residences | Metro, State |
-| Condo/Co-op | Typical value for condominiums and co-ops | Metro, State |
-| Top-Tier | Typical value (65th-95th percentile) | Metro, State |
-| Bottom-Tier | Typical value (5th-35th percentile) | Metro, State |
+- Typical U.S. home value (2025): ~$368,000
 
-**Current Statistics (2025):**
-- Typical U.S. home value: ~$368,000
+For methodology details, see [Zillow's ZHVI documentation](https://www.zillow.com/research/methodology-neural-zhvi-32128/).
 
 #### ZORI (Zillow Observed Rent Index)
 
-The Zillow Observed Rent Index (ZORI) is a smoothed measure of the typical observed market rate rent across a given region.
+The Zillow Observed Rent Index (ZORI) is a smoothed measure of the typical observed market rate rent across a given region. This pipeline uses the **All Homes (40th–60th percentile)** dataset at the **state level**.
 
-| Dataset | Description | Geographic Levels |
-|---------|-------------|-------------------|
-| All Homes | Typical rent for all home types (40th-60th percentile) | Metro, State, County, City, ZIP |
+- National rent index (2025): ~$2,049/month
 
-**Current Statistics (2025):**
-- National rent index: ~$2,049/month
-- Annual rent growth: ~3-4%
+For methodology details, see [Zillow's ZORI documentation](https://www.zillow.com/research/methodology-zori-repeat-rent-27092/).
 
 ### Data Characteristics
 
 - **Update Frequency:** Monthly
 - **Historical Data:** Available from 2000 onwards
-- **Format:** CSV files with wide format (dates as columns)
-- **Data Quality:** Smoothed and seasonally adjusted
+- **Source Format:** CSV files in wide format (dates as columns)
+- **Data Quality:** Smoothed and seasonally adjusted by Zillow
 
 ## Quick Start
 
@@ -73,58 +64,61 @@ The Zillow Observed Rent Index (ZORI) is a smoothed measure of the typical obser
 ### Installation
 
 1. Clone the repository:
+
    ```bash
-   git clone <repository-url>
-   cd ADS507_FinalProject
+   git clone https://github.com/masondelan/ADS507_Zillow.git
+   cd ADS507_Zillow
    ```
 
 2. Start the services:
+
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
+   This builds a custom Airflow image and launches five containers: the Airflow metadata database, the pipeline database, an initialization container, the Airflow webserver, and the Airflow scheduler.
+
 3. Access the Airflow UI:
+
    - URL: http://localhost:8080
    - Username: `admin`
    - Password: `admin`
 
-4. Enable and trigger the `zillow_etl_pipeline` DAG
+4. Enable and trigger the `zillow_etl_pipeline` DAG.
 
 ### Services
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Airflow Webserver | 8080 | Airflow web UI |
-| PostgreSQL | 5432 | Database server |
+| Service            | Port | Description                          |
+|--------------------|------|--------------------------------------|
+| Airflow Webserver  | 8080 | Airflow web UI                       |
+| Airflow Scheduler  | —    | Executes DAG tasks on schedule       |
+| Pipeline DB        | 5434 | PostgreSQL database for housing data |
+| Airflow DB         | 5432 | PostgreSQL metadata database         |
 
 ## Data Architecture
 
+The pipeline follows a three-layer medallion architecture. All housing data is stored in the **pipeline-db** PostgreSQL instance.
+
 ### Layer 1: Raw (Bronze)
 
-Raw data as extracted from Zillow without modifications.
+Raw data as extracted from Zillow, stored in long format after unpivoting from the original wide CSV structure.
 
-- `raw.raw_zhvi` - Home value index data
-- `raw.raw_zori` - Rental index data
+- `raw_zhvi_all_homes` — Home value index data (one row per state per month)
+- `raw_zori_all_homes` — Rental index data (one row per state per month)
 
 ### Layer 2: Staging (Silver)
 
-Cleaned and transformed data in long format.
+Cleaned and filtered data ready for analytics joins.
 
-- `staging.stg_zhvi` - Unpivoted home values
-- `staging.stg_zori` - Unpivoted rental values
-- `staging.dim_geography` - Geographic dimension
-- `staging.dim_date` - Date dimension
+- `stg_zhvi` — Cleaned home values with null states removed
+- `stg_zori` — Cleaned rental values with null states removed
 
 ### Layer 3: Marts (Gold)
 
-Analytics-ready tables and views.
+Analytics-ready tables for dashboards and reporting.
 
-- `marts.fact_home_values` - Home value facts with MoM/YoY changes
-- `marts.fact_rental_values` - Rental value facts with MoM/YoY changes
-- `marts.vw_metro_home_values` - Metro-level home value trends
-- `marts.vw_metro_rentals` - Metro-level rental trends
-- `marts.vw_price_to_rent` - Price-to-rent ratio analysis
-- `marts.vw_affordability_index` - Affordability metrics
+- `mart_housing_time_series` — Combined home values and rent data per state per month, with price-to-rent ratio
+- `mart_housing_growth` — Year-over-year home value growth calculated using window functions
 
 ## ETL Pipeline
 
@@ -136,42 +130,61 @@ The Airflow DAG `zillow_etl_pipeline` orchestrates the following tasks:
 [extract_zori] ──► [load_zori_to_raw] ──┘
 ```
 
+### Task Descriptions
+
+| Task                   | Description                                                        |
+|------------------------|--------------------------------------------------------------------|
+| `extract_zhvi`         | Downloads ZHVI CSV data from Zillow Research                       |
+| `extract_zori`         | Downloads ZORI CSV data from Zillow Research                       |
+| `load_zhvi_to_raw`     | Unpivots and loads ZHVI data into the raw layer                    |
+| `load_zori_to_raw`     | Unpivots and loads ZORI data into the raw layer                    |
+| `transform_to_staging` | Cleans and filters raw data into staging tables                    |
+| `build_data_marts`     | Builds analytics tables with derived metrics (YoY growth, ratios)  |
+| `data_quality_check`   | Validates row counts and data integrity across layers              |
+
 ### Schedule
 
-The pipeline runs monthly to align with Zillow's data update frequency.
+The pipeline runs monthly (`@monthly`) to align with Zillow's data update frequency. Catchup is disabled.
+
+## Docker Configuration
+
+The project uses a custom Airflow image built from `docker/Dockerfile.airflow` on top of Airflow 2.8.4 with PostgreSQL 15 for both the Airflow metadata database and the pipeline database. Environment variables for the pipeline database connection are passed to all Airflow containers via `PIPE_DB_*` variables. The ETL modules in `etl/` are mounted into the Airflow containers and added to `PYTHONPATH` so DAG tasks can import them directly.
 
 ## Development
 
 ### Local Development Setup
 
 1. Create a virtual environment:
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 2. Install dependencies:
+
    ```bash
    pip install -r etl/requirements.txt
    ```
 
-3. Run extraction tests:
+3. Run extraction locally:
+
    ```bash
    python etl/extract.py
    ```
 
-### Running Tests
-
-```bash
-pytest tests/ -v
-```
-
 ## Data Sources
 
 - **Zillow Research:** https://www.zillow.com/research/data/
-- **Methodology - ZHVI:** https://www.zillow.com/research/methodology-neural-zhvi-32128/
-- **Methodology - ZORI:** https://www.zillow.com/research/methodology-zori-repeat-rent-27092/
+- **ZHVI Methodology:** https://www.zillow.com/research/methodology-neural-zhvi-32128/
+- **ZORI Methodology:** https://www.zillow.com/research/methodology-zori-repeat-rent-27092/
+
+## Team
+
+- Mason Delan
+- Titus Sun
+- Sushma Kafle
 
 ## License
 
-This project is for educational purposes. Zillow data is subject to Zillow's terms of use.
+This project is for educational purposes as part of ADS 507 at the University of San Diego. Zillow data is subject to [Zillow's terms of use](https://www.zillow.com/z/corp/terms/).
