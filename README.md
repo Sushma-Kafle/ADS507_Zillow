@@ -94,6 +94,7 @@ For methodology details, see [Zillow's ZORI documentation](https://www.zillow.co
 | Airflow Scheduler  | —    | Executes DAG tasks on schedule       |
 | Pipeline DB        | 5434 | PostgreSQL database for housing data |
 | Airflow DB         | 5432 | PostgreSQL metadata database         |
+| Metabase           | 3000 | BI dashboard connected to pipeline DB|
 
 ## Data Architecture
 
@@ -172,6 +173,135 @@ The project uses a custom Airflow image built from `docker/Dockerfile.airflow` o
    ```bash
    python etl/extract.py
    ```
+
+## Monitoring
+
+### Airflow UI
+
+Access the Airflow web interface at [http://localhost:8080](http://localhost:8080) (username: `admin`, password: `admin`). From the DAGs list, click on `zillow_etl_pipeline` to view the DAG detail page.
+
+### DAG Tasks
+
+The pipeline consists of 7 tasks:
+
+| Task | What It Does |
+|------|-------------|
+| `extract_zhvi` | Downloads ZHVI CSV from Zillow Research |
+| `extract_zori` | Downloads ZORI CSV from Zillow Research |
+| `load_zhvi_to_raw` | Unpivots wide CSV and inserts ZHVI rows into `raw_zhvi` |
+| `load_zori_to_raw` | Unpivots wide CSV and inserts ZORI rows into `raw_zori` |
+| `transform_to_staging` | Cleans raw data into `stg_zhvi` and `stg_zori` |
+| `build_data_marts` | Builds `mart_housing_time_series` and `mart_housing_growth` |
+| `data_quality_check` | Validates data integrity across all layers |
+
+In the Airflow UI, each task shows a colored status:
+- **Dark green** — Success
+- **Red** — Failed
+- **Yellow** — Running
+- **Light green** — Queued
+
+Click on any task in the Graph or Grid view, then select **Log** to see detailed execution output.
+
+### Automated Data Quality Checks
+
+The `data_quality_check` task runs automatically at the end of every pipeline execution and validates:
+
+- **Row counts** — Ensures all tables (`raw_zhvi`, `raw_zori`, `stg_zhvi`, `stg_zori`, `mart_housing_time_series`, `mart_housing_growth`) contain data
+- **Null checks** — Verifies that key columns (`state_name`, `date`, `value`) have no null values in staging tables
+- **Value ranges** — Confirms no negative values exist in home value or rent columns
+- **Date ranges** — Checks that date ranges are reasonable and span the expected historical period
+
+If any check fails, the task is marked as failed and the Airflow UI will show it in red.
+
+### Manual Data Verification
+
+You can connect directly to the pipeline database to inspect the data:
+
+```bash
+psql -h localhost -p 5434 -U pipeline -d pipeline
+```
+
+Useful queries:
+
+```sql
+-- Row counts per table
+SELECT 'raw_zhvi' AS tbl, COUNT(*) FROM raw_zhvi
+UNION ALL SELECT 'raw_zori', COUNT(*) FROM raw_zori
+UNION ALL SELECT 'stg_zhvi', COUNT(*) FROM stg_zhvi
+UNION ALL SELECT 'stg_zori', COUNT(*) FROM stg_zori
+UNION ALL SELECT 'mart_housing_time_series', COUNT(*) FROM mart_housing_time_series
+UNION ALL SELECT 'mart_housing_growth', COUNT(*) FROM mart_housing_growth;
+
+-- Check date range in raw data
+SELECT MIN(date), MAX(date) FROM raw_zhvi;
+
+-- Sample staging data
+SELECT * FROM stg_zhvi LIMIT 10;
+
+-- Check for nulls in staging
+SELECT COUNT(*) FROM stg_zhvi WHERE state_name IS NULL OR date IS NULL OR value IS NULL;
+```
+
+## Troubleshooting
+
+### Tables don't exist after the DAG runs
+
+This usually means the database volumes are not persisting between container restarts. Verify that `docker-compose.yml` includes named volumes for both `airflow-db` and `pipeline-db` (the `airflow-db-data` and `pipeline-db-data` volumes). If you recently added volumes, you may need to re-run the full pipeline:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Then trigger the DAG again from the Airflow UI or CLI.
+
+### Manually trigger the DAG from the CLI
+
+```bash
+docker exec airflow-scheduler airflow dags trigger zillow_etl_pipeline
+```
+
+To check the status of the triggered run:
+
+```bash
+docker exec airflow-scheduler airflow dags list-runs -d zillow_etl_pipeline
+```
+
+### Check container logs if a task fails
+
+View logs for a specific container:
+
+```bash
+docker logs airflow-scheduler
+docker logs airflow-webserver
+docker logs pipeline-db
+```
+
+To follow logs in real time:
+
+```bash
+docker logs -f airflow-scheduler
+```
+
+To view Airflow task logs for a specific task instance:
+
+```bash
+docker exec airflow-scheduler airflow tasks logs zillow_etl_pipeline <task_id> <execution_date>
+```
+
+### Connect to the pipeline database directly
+
+```bash
+psql -h localhost -p 5434 -U pipeline -d pipeline
+```
+
+Password: `pipeline`
+
+Once connected, list all tables:
+
+```sql
+\dt
+```
 
 ## Data Sources
 

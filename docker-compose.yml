@@ -8,6 +8,8 @@ services:
       POSTGRES_DB: airflow
     ports:
       - "5432:5432"
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
       interval: 5s
@@ -23,6 +25,8 @@ services:
       POSTGRES_DB: pipeline
     ports:
       - "5434:5432"
+    volumes:
+      - pipeline-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline"]
       interval: 5s
@@ -129,3 +133,24 @@ services:
       - ./etl:/opt/airflow/etl
     command: scheduler
     restart: always
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    depends_on:
+      pipeline-db:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: pipeline
+      MB_DB_PORT: "5432"
+      MB_DB_USER: pipeline
+      MB_DB_PASS: pipeline
+      MB_DB_HOST: pipeline-db
+    ports:
+      - "3000:3000"
+    restart: always
+
+volumes:
+  airflow-db-data:
+  pipeline-db-data:
