@@ -177,13 +177,14 @@ def execute_sql_file(sql_file_path: str) -> None:
     conn_string = get_db_connection_string()
     engine = create_engine(conn_string)
 
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         # Split by semicolon and execute each statement
         statements = [s.strip() for s in sql_script.split(';') if s.strip()]
         for statement in statements:
-            if statement:
+            # Skip comment-only blocks (no actual SQL)
+            lines = [l.strip() for l in statement.splitlines() if l.strip() and not l.strip().startswith('--')]
+            if lines:
                 conn.execute(text(statement))
-        conn.commit()
 
     print(f"✓ Executed {sql_file_path}")
     engine.dispose()

@@ -30,11 +30,11 @@ DROP TABLE IF EXISTS stg_zhvi;
 
 CREATE TABLE stg_zhvi AS
 SELECT
-    region_id,
+    region_id::INT,
     region_name,
     state_name AS state,
-    date,
-    home_value
+    date::DATE,
+    home_value::NUMERIC(12, 2)
 FROM raw_zhvi
 WHERE state_name IS NOT NULL
   AND home_value IS NOT NULL
@@ -51,11 +51,11 @@ DROP TABLE IF EXISTS stg_zori;
 
 CREATE TABLE stg_zori AS
 SELECT
-    region_id,
+    region_id::INT,
     region_name,
     state_name AS state,
-    date,
-    rent_value
+    date::DATE,
+    rent_value::NUMERIC(12, 2)
 FROM raw_zori
 WHERE state_name IS NOT NULL
   AND rent_value IS NOT NULL

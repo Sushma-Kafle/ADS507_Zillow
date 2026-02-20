@@ -82,21 +82,13 @@ def load_zori_to_raw(**kwargs):
 
 def transform_to_staging(**kwargs):
     """Transform raw data into staging layer by executing staging SQL."""
-    sql_path = '/opt/airflow/etl/../sql/02_staging.sql'
-    if not os.path.exists(sql_path):
-        # Fallback to alternative path
-        sql_path = '/opt/airflow/dags/../sql/02_staging.sql'
-
+    sql_path = '/opt/airflow/sql/02_staging.sql'
     execute_sql_file(sql_path)
 
 
 def build_data_marts(**kwargs):
     """Build data marts from staging layer by executing marts SQL."""
-    sql_path = '/opt/airflow/etl/../sql/03_marts.sql'
-    if not os.path.exists(sql_path):
-        # Fallback to alternative path
-        sql_path = '/opt/airflow/dags/../sql/03_marts.sql'
-
+    sql_path = '/opt/airflow/sql/03_marts.sql'
     execute_sql_file(sql_path)
 
 
@@ -185,7 +177,7 @@ def data_quality_check(**kwargs):
 
         for table, column, min_val in value_checks:
             result = conn.execute(
-                text(f"SELECT COUNT(*) as cnt FROM {table} WHERE {column} < {min_val}")
+                text(f"SELECT COUNT(*) as cnt FROM {table} WHERE {column}::NUMERIC < {min_val}")
             )
             invalid_count = result.fetchone()[0]
             if invalid_count > 0:
@@ -201,7 +193,7 @@ def data_quality_check(**kwargs):
 
         for table in ['raw_zhvi', 'raw_zori', 'stg_zhvi', 'stg_zori']:
             result = conn.execute(
-                text(f"SELECT MIN(date) as min_date, MAX(date) as max_date FROM {table}")
+                text(f"SELECT MIN(date::DATE) as min_date, MAX(date::DATE) as max_date FROM {table}")
             )
             row = result.fetchone()
             print(f"  {table:30s} : {row[0]} to {row[1]}")

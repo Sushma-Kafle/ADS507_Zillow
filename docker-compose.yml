@@ -59,6 +59,8 @@ services:
     volumes:
       - ./airflow:/opt/airflow/dags
       - ./etl:/opt/airflow/etl
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
     command: >
       bash -lc "airflow db migrate &&
       (airflow users create
@@ -98,6 +100,8 @@ services:
     volumes:
       - ./airflow:/opt/airflow/dags
       - ./etl:/opt/airflow/etl
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
     ports:
       - "8080:8080"
     command: webserver
@@ -131,6 +135,8 @@ services:
     volumes:
       - ./airflow:/opt/airflow/dags
       - ./etl:/opt/airflow/etl
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
     command: scheduler
     restart: always
 
